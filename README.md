@@ -31,11 +31,11 @@ The following files/directories are excluded from backup:
 - Log files, git directories, node_modules
 - System files (.DS_Store, Thumbs.db)
 
-## Setup
+## Installation
 
 ```bash
-# Make executable
-chmod +x wp-backup.sh
+# Download and make executable
+curl -o wp-backup.sh https://raw.githubusercontent.com/lukasleitsch/wp-backup/refs/heads/main/wp-backup.sh && chmod +x wp-backup.sh
 
 # First run creates config file in home directory
 ./wp-backup.sh
