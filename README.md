@@ -34,10 +34,11 @@ The following files/directories are excluded from backup:
 ## Installation
 
 ```bash
-# Download and make executable
 curl -o wp-backup.sh https://raw.githubusercontent.com/lukasleitsch/wp-backup/refs/heads/main/wp-backup.sh && chmod +x wp-backup.sh
+```
 
-# First run creates config file in home directory
+Then run the script:
+```bash
 ./wp-backup.sh
 ```
 
