@@ -128,12 +128,15 @@ backup_wordpress_files() {
     
     # Create tar archive with only wp-content directory and wp-config.php
     # Exclude WordPress thumbnails (can be regenerated with: wp media regenerate)
+    # Use --warning=no-file-changed to suppress warnings about files changing during backup
     tar -czf "$BACKUP_DIR/wordpress-files.tar.gz" \
         --dereference \
+        --warning=no-file-changed \
         --exclude="wp-content/cache" \
         --exclude="wp-content/uploads/cache" \
         --exclude="wp-content/plugins" \
         --exclude="wp-content/languages" \
+        --exclude="upgrade*" \
         --exclude="backwpup*" \
         --exclude="*.log" \
         --exclude=".git" \
