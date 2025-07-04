@@ -27,13 +27,13 @@ EOF
     
     # Source the configuration file
     source "$CONFIG_FILE"
+    
+    # Set WebDAV URL after loading config
+    WEBDAV_URL="https://$HETZNER_HOST$HETZNER_REMOTE_DIR"
 }
 
 # WordPress path (defaults to $HOME/html if not set)
 WORDPRESS_PATH="${WORDPRESS_PATH:-$HOME/html}"
-
-# Local backup directory (temporary storage)
-BACKUP_LOCAL_DIR="$HOME/tmp/wp-backups"
 
 # WP-CLI path (usually just 'wp' if in PATH)
 WP_CLI_PATH="wp"
@@ -42,7 +42,6 @@ set -euo pipefail
 
 # Date and timestamp
 DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="$BACKUP_LOCAL_DIR/$DATE"
 
 # Colors for output
 RED='\033[0;31m'
@@ -79,57 +78,62 @@ check_wordpress_path() {
     fi
 }
 
-# Create backup directory
-create_backup_dir() {
-    log "Creating backup directory: $BACKUP_DIR"
-    mkdir -p "$BACKUP_DIR"
-}
 
-# Create database dump using WP-CLI
-backup_database() {
-    log "Creating database dump..."
-    cd "$WORDPRESS_PATH"
+# Create remote backup folder
+create_remote_backup_folder() {
+    log "Creating remote backup folder: $DATE"
     
-    if ! $WP_CLI_PATH db export "$BACKUP_DIR/database.sql" --add-drop-table; then
-        error "Failed to create database dump"
+    # Create the timestamped folder on remote
+    if ! curl -X MKCOL -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/" --silent --fail >/dev/null; then
+        error "Failed to create remote backup folder"
         exit 1
     fi
     
-    log "Database dump created successfully"
-    
-    # Compress database dump
-    gzip "$BACKUP_DIR/database.sql"
-    log "Database dump compressed"
+    log "Remote backup folder created successfully"
 }
 
-# Get plugin list with versions using WP-CLI
-get_plugin_list() {
-    log "Getting plugin list with versions..."
+# Create database dump and stream directly to remote
+backup_database() {
+    log "Creating database dump and streaming to remote..."
     cd "$WORDPRESS_PATH"
     
-    if ! $WP_CLI_PATH plugin list --format=json > "$BACKUP_DIR/plugins.json"; then
+    # Stream database dump directly to remote folder
+    if ! $WP_CLI_PATH db export --add-drop-table - | gzip | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/database.sql.gz" --silent --fail >/dev/null; then
+        error "Failed to create and upload database dump"
+        exit 1
+    fi
+    
+    log "Database dump created and uploaded successfully"
+}
+
+# Get plugin list with versions using WP-CLI and upload to remote
+get_plugin_list() {
+    log "Getting plugin list with versions and uploading to remote..."
+    cd "$WORDPRESS_PATH"
+    
+    # Create and upload JSON plugin list
+    if ! $WP_CLI_PATH plugin list --format=json | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/plugins.json" --silent --fail >/dev/null; then
         warning "Failed to get plugin list in JSON format"
     fi
     
-    # Also create a readable text version
-    if ! $WP_CLI_PATH plugin list --format=table > "$BACKUP_DIR/plugins.txt"; then
+    # Also create and upload readable text version
+    if ! $WP_CLI_PATH plugin list --format=table | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/plugins.txt" --silent --fail >/dev/null; then
         warning "Failed to get plugin list in table format"
     fi
     
-    log "Plugin list created successfully"
+    log "Plugin list created and uploaded successfully"
 }
 
-# Create WordPress files backup (only wp-content and wp-config.php)
+# Create WordPress files backup and stream directly to remote
 backup_wordpress_files() {
-    log "Creating WordPress files backup (wp-content and wp-config.php only)..."
+    log "Creating WordPress files backup and streaming to remote..."
     
     # Change to WordPress directory
     cd "$WORDPRESS_PATH"
     
-    # Create tar archive with only wp-content directory and wp-config.php
+    # Create tar archive and stream directly to remote
     # Exclude WordPress thumbnails (can be regenerated with: wp media regenerate)
-    # Use --warning=no-file-changed to suppress warnings about files changing during backup
-    tar -czf "$BACKUP_DIR/wordpress-files.tar.gz" \
+    if ! tar -czf - \
         --dereference \
         --warning=no-file-changed \
         --exclude="wp-content/cache" \
@@ -148,101 +152,59 @@ backup_wordpress_files() {
         --exclude="*-[0-9]*x[0-9]*.png" \
         --exclude="*-[0-9]*x[0-9]*.gif" \
         --exclude="*-[0-9]*x[0-9]*.webp" \
-        wp-content/ wp-config.php
+        wp-content/ wp-config.php | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/wordpress-files.tar.gz" --silent --fail >/dev/null; then
+        error "Failed to create and upload WordPress files backup"
+        exit 1
+    fi
     
-    log "WordPress files backup created (wp-content and wp-config.php only)"
+    log "WordPress files backup created and uploaded successfully"
 }
 
-# Create manifest file with backup information
+# Create manifest file with backup information and upload to remote
 create_manifest() {
-    log "Creating backup manifest..."
+    log "Creating backup manifest and uploading to remote..."
     
-    cat > "$BACKUP_DIR/manifest.txt" << EOF
+    # Create manifest and stream to remote
+    cat << EOF | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/manifest.txt" --silent --fail >/dev/null
 Backup Date: $(date)
 WordPress Path: $WORDPRESS_PATH
-Backup Type: Full WordPress Backup
+Backup Type: Full WordPress Backup (Streamed)
 Database: Included (database.sql.gz)
 Files: Included (wordpress-files.tar.gz)
 Plugins List: Included (plugins.json, plugins.txt)
-
-File Sizes:
-$(ls -lh "$BACKUP_DIR" | tail -n +2)
 
 WordPress Version: $(cd "$WORDPRESS_PATH" && $WP_CLI_PATH core version 2>/dev/null || echo "Unknown")
 Active Theme: $(cd "$WORDPRESS_PATH" && $WP_CLI_PATH theme list --status=active --field=name 2>/dev/null || echo "Unknown")
 Total Plugins: $(cd "$WORDPRESS_PATH" && $WP_CLI_PATH plugin list --format=count 2>/dev/null || echo "Unknown")
 EOF
 
-    log "Manifest created"
-}
-
-# Create final comprehensive archive
-create_final_archive() {
-    log "Creating final backup archive..."
-    
-    # Create a comprehensive tar.gz archive containing all backup components
-    cd "$BACKUP_LOCAL_DIR"
-    tar -czf "$DATE.tar.gz" -C "$DATE" .
-    
-    # Move the archive to the backup directory for upload
-    mv "$DATE.tar.gz" "$BACKUP_DIR/"
-    
-    log "Final backup archive created: $DATE.tar.gz"
-}
-
-# Upload backup to Hetzner Storage Box using WebDAV
-upload_to_hetzner() {
-    log "Uploading backup to Hetzner Storage Box via WebDAV..."
-    
-    # WebDAV URL construction for Hetzner Storage Box
-    WEBDAV_BASE_URL="https://$HETZNER_HOST"
-    WEBDAV_DIR_URL="$WEBDAV_BASE_URL$HETZNER_REMOTE_DIR"
-    
-    # Upload only the final archive file
-    ARCHIVE_FILE="$BACKUP_DIR/$DATE.tar.gz"
-    if [ -f "$ARCHIVE_FILE" ]; then
-        filename=$(basename "$ARCHIVE_FILE")
-        log "Uploading $filename..."
-        
-        if curl -T "$ARCHIVE_FILE" -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_DIR_URL/$filename" --progress-bar; then
-            log "Successfully uploaded $filename"
-        else
-            error "Failed to upload $filename"
-            exit 1
-        fi
-    else
-        error "Archive file not found: $ARCHIVE_FILE"
-        exit 1
-    fi
-    
-    log "Backup uploaded successfully to Hetzner Storage Box"
+    log "Manifest created and uploaded successfully"
 }
 
 
-# Clean up old remote backups
+
+
+# Clean up old remote backup folders
 cleanup_remote_backups() {
-    log "Cleaning up old remote backups (keeping $REMOTE_BACKUP_COUNT)..."
+    log "Cleaning up old remote backup folders (keeping $REMOTE_BACKUP_COUNT)..."
     
-    # WebDAV URL for listing files
-    WEBDAV_LIST_URL="https://$HETZNER_HOST$HETZNER_REMOTE_DIR"
-    
-    # Get list of backup files (date-formatted .tar.gz files)
-    BACKUP_FILES=$(curl -s -u "$HETZNER_USER:$HETZNER_PASSWORD" -X PROPFIND "$WEBDAV_LIST_URL/" \
+    # Get list of backup directories (date-formatted folders)
+    BACKUP_DIRS=$(curl -s -u "$HETZNER_USER:$HETZNER_PASSWORD" -X PROPFIND "$WEBDAV_URL/" \
         -H "Depth: 1" \
         -H "Content-Type: text/xml" \
         --data '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><prop><displayname/></prop></propfind>' \
-        | grep -oE '[0-9]{8}_[0-9]{6}\.tar\.gz' | sort -r)
+        | grep -oE '[0-9]{8}_[0-9]{6}' | sort -r)
     
     # Keep only the specified number of backups
-    FILES_TO_DELETE=$(echo "$BACKUP_FILES" | tail -n +$((REMOTE_BACKUP_COUNT + 1)))
+    DIRS_TO_DELETE=$(echo "$BACKUP_DIRS" | tail -n +$((REMOTE_BACKUP_COUNT + 1)))
     
-    if [ -n "$FILES_TO_DELETE" ]; then
-        for file in $FILES_TO_DELETE; do
-            log "Deleting old backup: $file"
-            curl -s -u "$HETZNER_USER:$HETZNER_PASSWORD" -X DELETE "$WEBDAV_LIST_URL/$file" 2>/dev/null || warning "Could not delete backup: $file"
+    if [ -n "$DIRS_TO_DELETE" ]; then
+        for dir in $DIRS_TO_DELETE; do
+            log "Deleting old backup folder: $dir"
+            curl -s -u "$HETZNER_USER:$HETZNER_PASSWORD" -X DELETE "$WEBDAV_URL/$dir/" --fail 2>/dev/null || warning "Could not delete backup folder: $dir"
         done
     else
-        log "No old backups to clean up"
+        log "No old backup folders to clean up"
     fi
 }
 
@@ -258,38 +220,19 @@ main() {
     check_wordpress_path
     
     # Create backup
-    create_backup_dir
+    create_remote_backup_folder
     backup_database
     get_plugin_list
     backup_wordpress_files
     create_manifest
     
-    # Create single archive
-    create_final_archive
-    
-    # Upload to Hetzner
-    upload_to_hetzner
-    
     # Cleanup
     cleanup_remote_backups
     
     log "Backup process completed successfully!"
-    log "Backup location: $HETZNER_USER@$HETZNER_HOST:$HETZNER_REMOTE_DIR/$DATE"
-    
-    # Display backup size
-    BACKUP_SIZE=$(du -sh "$BACKUP_DIR/$DATE.tar.gz" | cut -f1)
-    log "Total backup size: $BACKUP_SIZE"
+    log "Backup location: $HETZNER_USER@$HETZNER_HOST:$HETZNER_REMOTE_DIR/$DATE/"
 }
 
-# Trap to cleanup on exit
-cleanup_on_exit() {
-    if [ -d "$BACKUP_LOCAL_DIR" ]; then
-        log "Cleaning up temporary files..."
-        rm -rf "$BACKUP_LOCAL_DIR"
-    fi
-}
-
-trap cleanup_on_exit EXIT
 
 # Run main function
 main "$@"

@@ -1,6 +1,6 @@
 # WordPress Backup Script
 
-A simple bash script for creating WordPress backups and uploading them to Hetzner Storage Box via WebDAV.
+A simple bash script for creating WordPress backups and uploading them to Hetzner Storage Box via WebDAV. The script uses **streaming** to upload backups directly to remote storage without storing temporary files locally.
 
 ## Prerequisites
 
@@ -14,12 +14,20 @@ A simple bash script for creating WordPress backups and uploading them to Hetzne
 
 The script creates backups of:
 
-- **Database** - Complete WordPress database dump (compressed with gzip)
-- **WordPress Files** - Only essential files:
+- **Database** - Complete WordPress database dump (compressed with gzip, streamed directly to remote)
+- **WordPress Files** - Only essential files (streamed directly to remote):
   - `wp-content/` directory (excluding cache, plugins, languages)
   - `wp-config.php` file
 - **Plugin List** - Complete plugin inventory with versions (JSON and text format)
 - **Manifest** - Backup metadata including WordPress version, theme, and file sizes
+
+## Streaming Feature
+
+The script uses **direct streaming** to upload backups:
+- No temporary files are stored locally
+- Database dumps are piped directly from WP-CLI through gzip to curl
+- File archives are created by tar and streamed directly to remote storage
+- Reduces local disk usage and speeds up backup process
 
 ### Exclusions
 
