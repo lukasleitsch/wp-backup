@@ -88,7 +88,27 @@ HETZNER_USER="your-username"
 HETZNER_PASSWORD="your-password"
 HETZNER_REMOTE_DIR="/"
 REMOTE_BACKUP_COUNT="3"
+
+# Healthchecks.io monitoring URL (optional)
+HEALTHCHECK_URL=""
 ```
+
+## Monitoring with Healthchecks.io
+
+The script supports monitoring via [Healthchecks.io](https://healthchecks.io/) or self-hosted instances to track backup success/failure:
+
+1. Create a check at https://healthchecks.io/ or your self-hosted instance
+2. Copy your ping URL 
+3. Add it to your config file:
+   ```bash
+   HEALTHCHECK_URL="https://hc-ping.com/your-uuid-here"
+   # or for self-hosted: HEALTHCHECK_URL="https://your-domain.com/ping/your-uuid-here"
+   ```
+
+The script will:
+- Send `/start` signal when backup begins
+- Send success ping with logs when backup completes
+- Send failure ping with logs and exit code if backup fails
 
 ## Restore Notes
 
