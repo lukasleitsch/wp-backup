@@ -58,6 +58,20 @@ The first run will create `~/.wp-backup.conf` and exit. Edit this file with your
 ./wp-backup.sh
 ```
 
+## Automating with Cron
+
+To run backups automatically, add the script to your crontab:
+
+```bash
+# Edit crontab
+crontab -e
+
+# Run daily at 2 AM (suppress output to avoid emails)
+0 2 * * * /path/to/wp-backup.sh >/dev/null 2>&1
+```
+
+Make sure to use the full path to the script in your cron job.
+
 ## Security Note
 
 **No encryption is used** - backups are stored as plain compressed archives.
