@@ -98,7 +98,7 @@ HEALTHCHECK_URL=""
 The script supports monitoring via [Healthchecks.io](https://healthchecks.io/) or self-hosted instances to track backup success/failure:
 
 1. Create a check at https://healthchecks.io/ or your self-hosted instance
-2. Copy your ping URL 
+2. Copy your ping URL
 3. Add it to your config file:
    ```bash
    HEALTHCHECK_URL="https://hc-ping.com/your-uuid-here"
@@ -115,9 +115,4 @@ The script will:
 After restoring files, regenerate WordPress thumbnails:
 ```bash
 wp media regenerate
-```
-
-Reinstall plugins using the backed up plugin list:
-```bash
-wp plugin install --activate $(jq -r '.[].name' plugins.json)
 ```

@@ -165,7 +165,6 @@ backup_wordpress_files() {
         --warning=no-file-changed \
         --exclude="wp-content/cache" \
         --exclude="wp-content/uploads/cache" \
-        --exclude="wp-content/plugins" \
         --exclude="wp-content/languages" \
         --exclude="upgrade*" \
         --exclude="backwpup*" \

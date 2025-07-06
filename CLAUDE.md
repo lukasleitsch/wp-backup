@@ -62,7 +62,7 @@ The script requires a config file at `~/.wp-backup.conf` with:
 The script creates backups of:
 - **Database** - Complete WordPress database dump (compressed with gzip)
 - **WordPress Files** - Only essential files:
-  - `wp-content/` directory (excluding cache, plugins, languages)
+  - `wp-content/` directory (excluding cache, languages)
   - `wp-config.php` file
 - **Plugin List** - Complete plugin inventory with versions (JSON and text format)
 - **Manifest** - Backup metadata including WordPress version, theme, and file sizes
@@ -71,7 +71,6 @@ The script creates backups of:
 
 The following files/directories are excluded from backup:
 - WordPress cache directories
-- Plugin files (backed up separately as a list)
 - Language files
 - **Thumbnails** (can be regenerated with `wp media regenerate`)
 - Log files, git directories, node_modules
@@ -101,7 +100,3 @@ After restoring files, regenerate WordPress thumbnails:
 wp media regenerate
 ```
 
-Reinstall plugins using the backed up plugin list:
-```bash
-wp plugin install --activate $(jq -r '.[].name' plugins.json)
-```
