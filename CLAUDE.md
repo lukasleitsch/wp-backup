@@ -100,3 +100,8 @@ After restoring files, regenerate WordPress thumbnails:
 wp media regenerate
 ```
 
+## Coding Guidelines
+
+- Don't use short parameter versions. Always use the long parameter format
+- Avoid redundant comments that simply restate what the function name already conveys
+- Only one empty line between functions

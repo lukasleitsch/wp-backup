@@ -79,11 +79,26 @@ warning() {
 "
 }
 
+webdav_curl() {
+    local path="$1"
+    shift
+    curl \
+        --max-time 600 \
+        --connect-timeout 30 \
+        --retry 2 \
+        --retry-delay 15 \
+        --user "$HETZNER_USER:$HETZNER_PASSWORD" \
+        --silent \
+        --fail \
+        "$@" \
+        "$WEBDAV_URL$path"
+}
+
 healthcheck_ping() {
     local endpoint="$1"
-    
+
     [ -z "$HEALTHCHECK_URL" ] && return
-    
+
     if [ -n "$LOG_CAPTURE" ]; then
         curl -fsS -m 10 --retry 5 --data-raw "$LOG_CAPTURE" "$HEALTHCHECK_URL$endpoint" >/dev/null 2>&1 || warning "Healthcheck ping failed"
     else
@@ -91,65 +106,58 @@ healthcheck_ping() {
     fi
 }
 
-# Check if wp-cli is available
 check_wp_cli() {
     if ! command -v $WP_CLI_PATH &> /dev/null; then
         error "WP-CLI not found. Please install WP-CLI or update WP_CLI_PATH variable."
     fi
 }
 
-# Check if WordPress directory exists
 check_wordpress_path() {
     if [ ! -d "$WORDPRESS_PATH" ]; then
         error "WordPress directory not found at: $WORDPRESS_PATH"
     fi
 }
 
-
-# Create remote backup folder
 create_remote_backup_folder() {
     log "Creating remote backup folder: $DATE"
 
     # Create the timestamped folder on remote
-    if ! curl -X MKCOL -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/" --silent --fail >/dev/null; then
+    if ! webdav_curl "/$DATE/" --request MKCOL >/dev/null; then
         error "Failed to create remote backup folder"
     fi
 
     log "Remote backup folder created successfully"
 }
 
-# Create database dump and stream directly to remote
 backup_database() {
     log "Creating database dump and streaming to remote..."
     cd "$WORDPRESS_PATH"
 
     # Stream database dump directly to remote folder
-    if ! $WP_CLI_PATH db export --add-drop-table - | gzip | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/database.sql.gz" --silent --fail >/dev/null; then
+    if ! $WP_CLI_PATH db export --add-drop-table - | gzip | webdav_curl "/$DATE/database.sql.gz" --upload-file - >/dev/null; then
         error "Failed to create and upload database dump"
     fi
 
     log "Database dump created and uploaded successfully"
 }
 
-# Get plugin list with versions using WP-CLI and upload to remote
 get_plugin_list() {
     log "Getting plugin list with versions and uploading to remote..."
     cd "$WORDPRESS_PATH"
 
     # Create and upload JSON plugin list
-    if ! $WP_CLI_PATH plugin list --format=json | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/plugins.json" --silent --fail >/dev/null; then
+    if ! $WP_CLI_PATH plugin list --format=json | webdav_curl "/$DATE/plugins.json" --upload-file - >/dev/null; then
         warning "Failed to get plugin list in JSON format"
     fi
 
     # Also create and upload readable text version
-    if ! $WP_CLI_PATH plugin list --format=table | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/plugins.txt" --silent --fail >/dev/null; then
+    if ! $WP_CLI_PATH plugin list --format=table | webdav_curl "/$DATE/plugins.txt" --upload-file - >/dev/null; then
         warning "Failed to get plugin list in table format"
     fi
 
     log "Plugin list created and uploaded successfully"
 }
 
-# Create WordPress files backup and stream directly to remote
 backup_wordpress_files() {
     log "Creating WordPress files backup and streaming to remote..."
 
@@ -176,19 +184,18 @@ backup_wordpress_files() {
         --exclude="*-[0-9]*x[0-9]*.png" \
         --exclude="*-[0-9]*x[0-9]*.gif" \
         --exclude="*-[0-9]*x[0-9]*.webp" \
-        wp-content/ wp-config.php | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/wordpress-files.tar.gz" --silent --fail >/dev/null; then
+        wp-content/ wp-config.php | webdav_curl "/$DATE/wordpress-files.tar.gz" --upload-file - >/dev/null; then
         error "Failed to create and upload WordPress files backup"
     fi
 
     log "WordPress files backup created and uploaded successfully"
 }
 
-# Create manifest file with backup information and upload to remote
 create_manifest() {
     log "Creating backup manifest and uploading to remote..."
 
     # Create manifest and stream to remote
-    cat << EOF | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/manifest.txt" --silent --fail >/dev/null
+    cat << EOF | webdav_curl "/$DATE/manifest.txt" --upload-file - >/dev/null
 Backup Date: $(date)
 WordPress Path: $WORDPRESS_PATH
 Backup Type: Full WordPress Backup (Streamed)
@@ -204,10 +211,6 @@ EOF
     log "Manifest created and uploaded successfully"
 }
 
-
-
-
-# Clean up old remote backup folders
 cleanup_remote_backups() {
     log "Cleaning up old remote backup folders (keeping $REMOTE_BACKUP_COUNT)..."
 
@@ -231,7 +234,6 @@ cleanup_remote_backups() {
     fi
 }
 
-# Main execution
 main() {
     log "Starting WordPress backup process..."
 
@@ -256,13 +258,10 @@ main() {
     cleanup_remote_backups
 
     log "Backup process completed successfully!"
-    log "Backup location: $HETZNER_USER@$HETZNER_HOST:$HETZNER_REMOTE_DIR/$DATE/"
 
     # Signal backup success
     healthcheck_ping ""
 }
-
-
 
 # Run main function
 main "$@"
