@@ -25,7 +25,6 @@ HEALTHCHECK_URL=""
 EOF
         chmod 600 "$CONFIG_FILE"
         error "Please edit $CONFIG_FILE with your Storage Box credentials and run the script again."
-        exit 1
     fi
 
     # Source the configuration file
@@ -65,9 +64,12 @@ log() {
 
 error() {
     local message="[ERROR] $1"
+    local exit_code="${2:-1}"
     echo -e "${RED}${message}${NC}" >&2
     LOG_CAPTURE="${LOG_CAPTURE}${message}
 "
+    healthcheck_ping "/$exit_code"
+    exit $exit_code
 }
 
 warning() {
@@ -93,7 +95,6 @@ healthcheck_ping() {
 check_wp_cli() {
     if ! command -v $WP_CLI_PATH &> /dev/null; then
         error "WP-CLI not found. Please install WP-CLI or update WP_CLI_PATH variable."
-        exit 1
     fi
 }
 
@@ -101,7 +102,6 @@ check_wp_cli() {
 check_wordpress_path() {
     if [ ! -d "$WORDPRESS_PATH" ]; then
         error "WordPress directory not found at: $WORDPRESS_PATH"
-        exit 1
     fi
 }
 
@@ -113,7 +113,6 @@ create_remote_backup_folder() {
     # Create the timestamped folder on remote
     if ! curl -X MKCOL -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/" --silent --fail >/dev/null; then
         error "Failed to create remote backup folder"
-        exit 1
     fi
 
     log "Remote backup folder created successfully"
@@ -127,7 +126,6 @@ backup_database() {
     # Stream database dump directly to remote folder
     if ! $WP_CLI_PATH db export --add-drop-table - | gzip | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/database.sql.gz" --silent --fail >/dev/null; then
         error "Failed to create and upload database dump"
-        exit 1
     fi
 
     log "Database dump created and uploaded successfully"
@@ -180,7 +178,6 @@ backup_wordpress_files() {
         --exclude="*-[0-9]*x[0-9]*.webp" \
         wp-content/ wp-config.php | curl -T - -u "$HETZNER_USER:$HETZNER_PASSWORD" "$WEBDAV_URL/$DATE/wordpress-files.tar.gz" --silent --fail >/dev/null; then
         error "Failed to create and upload WordPress files backup"
-        exit 1
     fi
 
     log "WordPress files backup created and uploaded successfully"
@@ -266,15 +263,6 @@ main() {
 }
 
 
-# Error handler for healthcheck failure ping
-error_handler() {
-    local exit_code=$?
-    healthcheck_ping "/$exit_code"
-    exit $exit_code
-}
-
-# Set up error trap
-trap error_handler ERR
 
 # Run main function
 main "$@"
