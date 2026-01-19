@@ -27,7 +27,6 @@ EOF
         error "Please edit $CONFIG_FILE with your Storage Box credentials and run the script again."
     fi
 
-    # Source the configuration file
     source "$CONFIG_FILE"
 
     # Set WebDAV URL after loading config
@@ -100,9 +99,9 @@ healthcheck_ping() {
     [ -z "$HEALTHCHECK_URL" ] && return
 
     if [ -n "$LOG_CAPTURE" ]; then
-        curl -fsS -m 10 --retry 5 --data-raw "$LOG_CAPTURE" "$HEALTHCHECK_URL$endpoint" >/dev/null 2>&1 || warning "Healthcheck ping failed"
+        curl --fail --silent --show-error --max-time 10 --retry 5 --data-raw "$LOG_CAPTURE" "$HEALTHCHECK_URL$endpoint" >/dev/null 2>&1 || warning "Healthcheck ping failed"
     else
-        curl -fsS -m 10 --retry 5 -o /dev/null "$HEALTHCHECK_URL$endpoint" >/dev/null 2>&1 || warning "Healthcheck ping failed"
+        curl --fail --silent --show-error --max-time 10 --retry 5 --output /dev/null "$HEALTHCHECK_URL$endpoint" >/dev/null 2>&1 || warning "Healthcheck ping failed"
     fi
 }
 
@@ -139,7 +138,6 @@ check_remote_connection() {
 create_remote_backup_folder() {
     log "Creating remote backup folder: $DATE"
 
-    # Create the timestamped folder on remote
     if ! webdav_curl "/$DATE/" --request MKCOL >/dev/null; then
         error "Failed to create remote backup folder"
     fi
@@ -151,7 +149,6 @@ backup_database() {
     log "Creating database dump and streaming to remote..."
     cd "$WORDPRESS_PATH"
 
-    # Stream database dump directly to remote folder
     if ! $WP_CLI_PATH db export --add-drop-table - | gzip | webdav_curl "/$DATE/database.sql.gz" --upload-file - >/dev/null; then
         error "Failed to create and upload database dump"
     fi
@@ -178,11 +175,8 @@ get_plugin_list() {
 
 backup_wordpress_files() {
     log "Creating WordPress files backup and streaming to remote..."
-
-    # Change to WordPress directory
     cd "$WORDPRESS_PATH"
 
-    # Create tar archive and stream directly to remote
     # Exclude WordPress thumbnails (can be regenerated with: wp media regenerate)
     if ! tar -czf - \
         --dereference \
@@ -212,7 +206,6 @@ backup_wordpress_files() {
 create_manifest() {
     log "Creating backup manifest and uploading to remote..."
 
-    # Create manifest and stream to remote
     cat << EOF | webdav_curl "/$DATE/manifest.txt" --upload-file - >/dev/null
 Backup Date: $(date)
 WordPress Path: $WORDPRESS_PATH
@@ -233,9 +226,9 @@ cleanup_remote_backups() {
     log "Cleaning up old remote backup folders (keeping $REMOTE_BACKUP_COUNT)..."
 
     # Get list of backup directories (date-formatted folders)
-    BACKUP_DIRS=$(curl -s -u "$HETZNER_USER:$HETZNER_PASSWORD" -X PROPFIND "$WEBDAV_URL/" \
-        -H "Depth: 1" \
-        -H "Content-Type: text/xml" \
+    BACKUP_DIRS=$(curl --silent --user "$HETZNER_USER:$HETZNER_PASSWORD" --request PROPFIND "$WEBDAV_URL/" \
+        --header "Depth: 1" \
+        --header "Content-Type: text/xml" \
         --data '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><prop><displayname/></prop></propfind>' \
         | grep -oE '[0-9]{8}_[0-9]{6}' | sort -r)
 
@@ -245,7 +238,7 @@ cleanup_remote_backups() {
     if [ -n "$DIRS_TO_DELETE" ]; then
         for dir in $DIRS_TO_DELETE; do
             log "Deleting old backup folder: $dir"
-            curl -s -u "$HETZNER_USER:$HETZNER_PASSWORD" -X DELETE "$WEBDAV_URL/$dir/" --fail 2>/dev/null || warning "Could not delete backup folder: $dir"
+            curl --silent --user "$HETZNER_USER:$HETZNER_PASSWORD" --request DELETE "$WEBDAV_URL/$dir/" --fail 2>/dev/null || warning "Could not delete backup folder: $dir"
         done
     else
         log "No old backup folders to clean up"
