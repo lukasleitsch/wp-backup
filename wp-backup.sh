@@ -85,7 +85,7 @@ webdav_curl() {
     curl \
         --max-time 600 \
         --connect-timeout 30 \
-        --retry 2 \
+        --retry 3 \
         --retry-delay 15 \
         --user "$HETZNER_USER:$HETZNER_PASSWORD" \
         --silent \
@@ -106,6 +106,16 @@ healthcheck_ping() {
     fi
 }
 
+trap_handler() {
+    local exit_code="$1"
+    local line_number="$2"
+    echo "[ERROR] Script failed at line $line_number (exit code: $exit_code)" >&2
+    healthcheck_ping "/$exit_code"
+    exit "$exit_code"
+}
+
+trap 'trap_handler $? $LINENO' ERR
+
 check_wp_cli() {
     if ! command -v $WP_CLI_PATH &> /dev/null; then
         error "WP-CLI not found. Please install WP-CLI or update WP_CLI_PATH variable."
@@ -116,6 +126,14 @@ check_wordpress_path() {
     if [ ! -d "$WORDPRESS_PATH" ]; then
         error "WordPress directory not found at: $WORDPRESS_PATH"
     fi
+}
+
+check_remote_connection() {
+    log "Checking connection to Hetzner Storage Box..."
+    if ! webdav_curl "/" --request PROPFIND --header "Depth: 0" >/dev/null 2>&1; then
+        error "Cannot connect to Hetzner Storage Box"
+    fi
+    log "Connection verified"
 }
 
 create_remote_backup_folder() {
@@ -246,6 +264,7 @@ main() {
     # Pre-flight checks
     check_wp_cli
     check_wordpress_path
+    check_remote_connection
 
     # Create backup
     create_remote_backup_folder
