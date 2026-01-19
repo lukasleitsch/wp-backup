@@ -58,6 +58,24 @@ The first run will create `~/.wp-backup.conf` and exit. Edit this file with your
 ./wp-backup.sh
 ```
 
+### Options
+
+- `--no-update` - Skip the automatic update check
+
+```bash
+./wp-backup.sh --no-update
+```
+
+## Auto-Update
+
+The script automatically checks for updates before each backup run. It uses conditional HTTP requests with ETag caching:
+
+- If the script hasn't changed on GitHub, no download occurs (HTTP 304)
+- If a new version is available, the script updates itself and restarts
+- The ETag is stored in `~/.wp-backup-etag`
+
+To disable auto-update, use the `--no-update` flag.
+
 ## Automating with Cron
 
 To run backups automatically, add the script to your crontab:

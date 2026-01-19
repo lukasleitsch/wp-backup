@@ -6,6 +6,10 @@
 # Configuration file path
 CONFIG_FILE="$HOME/.wp-backup.conf"
 
+# Auto-update settings
+SCRIPT_URL="https://raw.githubusercontent.com/lukasleitsch/wp-backup/main/wp-backup.sh"
+ETAG_FILE="$HOME/.wp-backup-etag"
+
 # Load configuration or create example config
 load_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
@@ -135,6 +139,40 @@ check_remote_connection() {
     log "Connection verified"
 }
 
+check_for_updates() {
+    local script_path="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    local stored_etag=$(cat "$ETAG_FILE" 2>/dev/null || echo "")
+    local response_file=$(mktemp)
+    local headers_file=$(mktemp)
+
+    local http_code
+    http_code=$(curl \
+        --silent \
+        --max-time 30 \
+        --output "$response_file" \
+        --dump-header "$headers_file" \
+        --write-out "%{http_code}" \
+        --header "If-None-Match: $stored_etag" \
+        "$SCRIPT_URL") || {
+        rm -f "$response_file" "$headers_file"
+        return 0
+    }
+
+    if [ "$http_code" != "200" ]; then
+        rm -f "$response_file" "$headers_file"
+        return 0
+    fi
+
+    local new_etag=$(grep --ignore-case "^etag:" "$headers_file" | tr -d '\r' | cut -d' ' -f2-)
+    log "Updating backup script..."
+    chmod +x "$response_file"
+    mv "$response_file" "$script_path"
+    echo "$new_etag" > "$ETAG_FILE"
+    rm -f "$headers_file"
+    log "Script updated. Restarting..."
+    exec "$script_path" --no-update
+}
+
 create_remote_backup_folder() {
     log "Creating remote backup folder: $DATE"
 
@@ -250,6 +288,11 @@ main() {
 
     # Load configuration
     load_config
+
+    # Check for script updates (skip with --no-update flag)
+    if [ "${1:-}" != "--no-update" ]; then
+        check_for_updates
+    fi
 
     # Signal backup start
     healthcheck_ping "/start"
