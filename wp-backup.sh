@@ -232,7 +232,8 @@ backup_wordpress_files() {
     cd "$WORDPRESS_PATH"
 
     # Thumbnails can be regenerated with: wp media regenerate
-    if ! tar --create --file - \
+    # GNU tar exits 1 when files change while being read, the archive is still usable
+    if ! { tar --create --file - \
         --dereference \
         --warning=no-file-changed \
         --exclude="wp-content/cache" \
@@ -247,7 +248,7 @@ backup_wordpress_files() {
         --exclude="Thumbs.db" \
         --no-wildcards \
         --exclude-from=<(list_regenerable_thumbnails) \
-        wp-content/ wp-config.php | zstd | webdav_upload "/$PARTIAL_DIR/wordpress-files.tar.zst" >/dev/null; then
+        wp-content/ wp-config.php || [ $? -eq 1 ]; } | zstd | webdav_upload "/$PARTIAL_DIR/wordpress-files.tar.zst" >/dev/null; then
         error "Failed to create and upload WordPress files backup"
     fi
 
