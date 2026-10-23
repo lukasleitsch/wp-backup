@@ -47,6 +47,7 @@ set -euo pipefail
 
 # Date and timestamp
 DATE=$(date +%Y%m%d_%H%M%S)
+PARTIAL_DIR="$DATE.partial"
 
 # Colors for output
 RED='\033[0;31m'
@@ -181,7 +182,7 @@ check_for_updates() {
 create_remote_backup_folder() {
     log "Creating remote backup folder: $DATE"
 
-    if ! webdav_curl "/$DATE/" --request MKCOL >/dev/null; then
+    if ! webdav_curl "/$PARTIAL_DIR/" --request MKCOL >/dev/null; then
         error "Failed to create remote backup folder"
     fi
 
@@ -192,7 +193,7 @@ backup_database() {
     log "Creating database dump and streaming to remote..."
     cd "$WORDPRESS_PATH"
 
-    if ! $WP_CLI_PATH db export --add-drop-table - | gzip | webdav_upload "/$DATE/database.sql.gz" >/dev/null; then
+    if ! $WP_CLI_PATH db export --add-drop-table - | gzip | webdav_upload "/$PARTIAL_DIR/database.sql.gz" >/dev/null; then
         error "Failed to create and upload database dump"
     fi
 
@@ -204,12 +205,12 @@ get_plugin_list() {
     cd "$WORDPRESS_PATH"
 
     # Create and upload JSON plugin list
-    if ! $WP_CLI_PATH plugin list --format=json | webdav_upload "/$DATE/plugins.json" >/dev/null; then
+    if ! $WP_CLI_PATH plugin list --format=json | webdav_upload "/$PARTIAL_DIR/plugins.json" >/dev/null; then
         warning "Failed to get plugin list in JSON format"
     fi
 
     # Also create and upload readable text version
-    if ! $WP_CLI_PATH plugin list --format=table | webdav_upload "/$DATE/plugins.txt" >/dev/null; then
+    if ! $WP_CLI_PATH plugin list --format=table | webdav_upload "/$PARTIAL_DIR/plugins.txt" >/dev/null; then
         warning "Failed to get plugin list in table format"
     fi
 
@@ -239,7 +240,7 @@ backup_wordpress_files() {
         --exclude="*-[0-9]*x[0-9]*.png" \
         --exclude="*-[0-9]*x[0-9]*.gif" \
         --exclude="*-[0-9]*x[0-9]*.webp" \
-        wp-content/ wp-config.php | webdav_upload "/$DATE/wordpress-files.tar.gz" >/dev/null; then
+        wp-content/ wp-config.php | webdav_upload "/$PARTIAL_DIR/wordpress-files.tar.gz" >/dev/null; then
         error "Failed to create and upload WordPress files backup"
     fi
 
@@ -249,7 +250,7 @@ backup_wordpress_files() {
 create_manifest() {
     log "Creating backup manifest and uploading to remote..."
 
-    cat << EOF | webdav_upload "/$DATE/manifest.txt" >/dev/null
+    cat << EOF | webdav_upload "/$PARTIAL_DIR/manifest.txt" >/dev/null
 Backup Date: $(date)
 WordPress Path: $WORDPRESS_PATH
 Backup Type: Full WordPress Backup (Streamed)
@@ -265,27 +266,39 @@ EOF
     log "Manifest created and uploaded successfully"
 }
 
+finalize_backup() {
+    log "Finalizing remote backup folder: $DATE"
+
+    if ! webdav_curl "/$PARTIAL_DIR/" --request MOVE --header "Destination: $WEBDAV_URL/$DATE/" >/dev/null; then
+        error "Failed to finalize remote backup folder"
+    fi
+
+    log "Remote backup folder finalized successfully"
+}
+
 cleanup_remote_backups() {
     log "Cleaning up old remote backup folders (keeping $REMOTE_BACKUP_COUNT)..."
 
-    # Get list of backup directories (date-formatted folders)
-    BACKUP_DIRS=$(curl --silent --user "$HETZNER_USER:$HETZNER_PASSWORD" --request PROPFIND "$WEBDAV_URL/" \
-        --header "Depth: 1" \
-        --header "Content-Type: text/xml" \
-        --data '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><prop><displayname/></prop></propfind>' \
-        | grep -oE '[0-9]{8}_[0-9]{6}' | sort -r)
-
-    # Keep only the specified number of backups
-    DIRS_TO_DELETE=$(echo "$BACKUP_DIRS" | tail -n +$((REMOTE_BACKUP_COUNT + 1)))
-
-    if [ -n "$DIRS_TO_DELETE" ]; then
-        for dir in $DIRS_TO_DELETE; do
-            log "Deleting old backup folder: $dir"
-            curl --silent --user "$HETZNER_USER:$HETZNER_PASSWORD" --request DELETE "$WEBDAV_URL/$dir/" --fail 2>/dev/null || warning "Could not delete backup folder: $dir"
-        done
-    else
-        log "No old backup folders to clean up"
+    if ! [[ "$REMOTE_BACKUP_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+        warning "REMOTE_BACKUP_COUNT must be a positive number, skipping cleanup"
+        return
     fi
+
+    # Request only resourcetype so each folder name appears once, in its href
+    local folders
+    folders=$(webdav_curl "/" --request PROPFIND --header "Depth: 1" \
+        --data '<?xml version="1.0"?><propfind xmlns="DAV:"><prop><resourcetype/></prop></propfind>' \
+        | grep --only-matching --extended-regexp '[0-9]{8}_[0-9]{6}(\.partial)?' \
+        | sort --reverse --unique || true)
+
+    local old_backups stale_partials
+    old_backups=$(echo "$folders" | grep --invert-match partial | tail --lines=+$((REMOTE_BACKUP_COUNT + 1)) || true)
+    stale_partials=$(echo "$folders" | grep partial || true)
+
+    for dir in $old_backups $stale_partials; do
+        log "Deleting old backup folder: $dir"
+        webdav_curl "/$dir/" --request DELETE >/dev/null || warning "Could not delete backup folder: $dir"
+    done
 }
 
 main() {
@@ -313,6 +326,7 @@ main() {
     get_plugin_list
     backup_wordpress_files
     create_manifest
+    finalize_backup
 
     # Cleanup
     cleanup_remote_backups
