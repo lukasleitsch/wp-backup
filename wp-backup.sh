@@ -10,6 +10,10 @@ CONFIG_FILE="$HOME/.wp-backup.conf"
 SCRIPT_URL="https://raw.githubusercontent.com/lukasleitsch/wp-backup/main/wp-backup.sh"
 ETAG_FILE="$HOME/.wp-backup-etag"
 
+# Holds the last WebDAV error, cron discards stderr so error() adds it to the healthcheck log
+CURL_ERROR_FILE="$HOME/.wp-backup-curl-error"
+: > "$CURL_ERROR_FILE"
+
 # Load configuration or create example config
 load_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
@@ -68,6 +72,7 @@ log() {
 
 error() {
     local message="[ERROR] $1"
+    [ -s "$CURL_ERROR_FILE" ] && message="$message: $(cat "$CURL_ERROR_FILE")"
     local exit_code="${2:-1}"
     echo -e "${RED}${message}${NC}" >&2
     LOG_CAPTURE="${LOG_CAPTURE}${message}
@@ -92,6 +97,8 @@ webdav_curl() {
         --retry-delay 15 \
         --user "$HETZNER_USER:$HETZNER_PASSWORD" \
         --silent \
+        --show-error \
+        --stderr "$CURL_ERROR_FILE" \
         --fail \
         "$@" \
         "$WEBDAV_URL$path"
