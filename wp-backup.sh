@@ -148,7 +148,8 @@ check_remote_connection() {
 check_for_updates() {
     local script_path="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
     local stored_etag=$(cat "$ETAG_FILE" 2>/dev/null || echo "")
-    local response_file=$(mktemp)
+    # Next to the script so the final mv is an atomic rename on the same filesystem
+    local response_file=$(mktemp "$script_path.XXXXXX")
     local headers_file=$(mktemp)
 
     local http_code
@@ -160,21 +161,27 @@ check_for_updates() {
         --write-out "%{http_code}" \
         --header "If-None-Match: $stored_etag" \
         "$SCRIPT_URL") || {
-        rm -f "$response_file" "$headers_file"
+        rm --force "$response_file" "$headers_file"
         return 0
     }
 
     if [ "$http_code" != "200" ]; then
-        rm -f "$response_file" "$headers_file"
+        rm --force "$response_file" "$headers_file"
+        return 0
+    fi
+
+    if [ "$(head --lines=1 "$response_file")" != "#!/bin/bash" ] || ! bash -n "$response_file" 2>/dev/null; then
+        warning "Downloaded update is invalid, keeping current version"
+        rm --force "$response_file" "$headers_file"
         return 0
     fi
 
     local new_etag=$(grep --ignore-case "^etag:" "$headers_file" | tr -d '\r' | cut -d' ' -f2-)
     log "Updating backup script..."
-    chmod +x "$response_file"
+    chmod --reference="$script_path" "$response_file"
     mv "$response_file" "$script_path"
     echo "$new_etag" > "$ETAG_FILE"
-    rm -f "$headers_file"
+    rm --force "$headers_file"
     log "Script updated. Restarting..."
     exec "$script_path" --no-update
 }
