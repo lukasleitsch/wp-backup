@@ -307,6 +307,12 @@ cleanup_remote_backups() {
         | grep --only-matching --extended-regexp '[0-9]{8}_[0-9]{6}(\.partial)?' \
         | sort --reverse --unique || true)
 
+    # The backup just created must be listed, otherwise listing or parsing failed
+    if ! echo "$folders" | grep --quiet --line-regexp "$DATE"; then
+        warning "Could not list remote backup folders, skipping cleanup"
+        return
+    fi
+
     local old_backups stale_partials
     old_backups=$(echo "$folders" | grep --invert-match partial | tail --lines=+$((REMOTE_BACKUP_COUNT + 1)) || true)
     stale_partials=$(echo "$folders" | grep partial || true)
