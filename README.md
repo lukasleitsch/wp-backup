@@ -33,7 +33,6 @@ The script uses **direct streaming** to upload backups:
 
 The following files/directories are excluded from backup:
 - WordPress cache directories
-- Plugin files (backed up separately as a list)
 - Language files
 - Thumbnails (can be regenerated with `wp media regenerate`)
 - Log files, git directories, node_modules
@@ -128,9 +127,17 @@ The script will:
 - Send success ping with logs when backup completes
 - Send failure ping with logs and exit code if backup fails
 
-## Restore Notes
+## Restore
 
-After restoring files, regenerate WordPress thumbnails:
+Skip `.partial` folders, those runs did not finish. Core, thumbnails and languages are not in the backup.
+
 ```bash
-wp media regenerate
+# new server only: core version from manifest.txt
+wp core download --version=<version> --skip-content
+
+tar --extract --zstd --file wordpress-files.tar.zst
+zstd --decompress --stdout database.sql.zst | wp db import -
+
+wp media regenerate --yes
+wp language core update && wp language plugin update --all && wp language theme update --all
 ```
