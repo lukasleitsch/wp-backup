@@ -97,6 +97,11 @@ webdav_curl() {
         "$WEBDAV_URL$path"
 }
 
+webdav_upload() {
+    # Streamed stdin cannot be replayed on retry, and large uploads exceed any fixed max time, so only abort on stalls
+    webdav_curl "$1" --retry 0 --max-time 0 --speed-limit 1 --speed-time 300 --upload-file -
+}
+
 healthcheck_ping() {
     local endpoint="$1"
 
@@ -187,7 +192,7 @@ backup_database() {
     log "Creating database dump and streaming to remote..."
     cd "$WORDPRESS_PATH"
 
-    if ! $WP_CLI_PATH db export --add-drop-table - | gzip | webdav_curl "/$DATE/database.sql.gz" --upload-file - >/dev/null; then
+    if ! $WP_CLI_PATH db export --add-drop-table - | gzip | webdav_upload "/$DATE/database.sql.gz" >/dev/null; then
         error "Failed to create and upload database dump"
     fi
 
@@ -199,12 +204,12 @@ get_plugin_list() {
     cd "$WORDPRESS_PATH"
 
     # Create and upload JSON plugin list
-    if ! $WP_CLI_PATH plugin list --format=json | webdav_curl "/$DATE/plugins.json" --upload-file - >/dev/null; then
+    if ! $WP_CLI_PATH plugin list --format=json | webdav_upload "/$DATE/plugins.json" >/dev/null; then
         warning "Failed to get plugin list in JSON format"
     fi
 
     # Also create and upload readable text version
-    if ! $WP_CLI_PATH plugin list --format=table | webdav_curl "/$DATE/plugins.txt" --upload-file - >/dev/null; then
+    if ! $WP_CLI_PATH plugin list --format=table | webdav_upload "/$DATE/plugins.txt" >/dev/null; then
         warning "Failed to get plugin list in table format"
     fi
 
@@ -234,7 +239,7 @@ backup_wordpress_files() {
         --exclude="*-[0-9]*x[0-9]*.png" \
         --exclude="*-[0-9]*x[0-9]*.gif" \
         --exclude="*-[0-9]*x[0-9]*.webp" \
-        wp-content/ wp-config.php | webdav_curl "/$DATE/wordpress-files.tar.gz" --upload-file - >/dev/null; then
+        wp-content/ wp-config.php | webdav_upload "/$DATE/wordpress-files.tar.gz" >/dev/null; then
         error "Failed to create and upload WordPress files backup"
     fi
 
@@ -244,7 +249,7 @@ backup_wordpress_files() {
 create_manifest() {
     log "Creating backup manifest and uploading to remote..."
 
-    cat << EOF | webdav_curl "/$DATE/manifest.txt" --upload-file - >/dev/null
+    cat << EOF | webdav_upload "/$DATE/manifest.txt" >/dev/null
 Backup Date: $(date)
 WordPress Path: $WORDPRESS_PATH
 Backup Type: Full WordPress Backup (Streamed)
