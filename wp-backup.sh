@@ -217,11 +217,21 @@ get_plugin_list() {
     log "Plugin list created and uploaded successfully"
 }
 
+# A file named name-WIDTHxHEIGHT.ext is only a thumbnail if name.ext exists next to it, otherwise it is an original
+list_regenerable_thumbnails() {
+    shopt -s nocasematch
+    find -L wp-content/uploads -type f -name '*-*x*.*' 2>/dev/null | while IFS= read -r file; do
+        if [[ $file =~ ^(.*)-[0-9]+x[0-9]+\.(jpe?g|png|gif|webp|avif)$ ]] && [ -e "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}" ]; then
+            echo "$file"
+        fi
+    done
+}
+
 backup_wordpress_files() {
     log "Creating WordPress files backup and streaming to remote..."
     cd "$WORDPRESS_PATH"
 
-    # Exclude WordPress thumbnails (can be regenerated with: wp media regenerate)
+    # Thumbnails can be regenerated with: wp media regenerate
     if ! tar --create --file - \
         --dereference \
         --warning=no-file-changed \
@@ -235,11 +245,8 @@ backup_wordpress_files() {
         --exclude="node_modules" \
         --exclude=".DS_Store" \
         --exclude="Thumbs.db" \
-        --exclude="*-[0-9]*x[0-9]*.jpg" \
-        --exclude="*-[0-9]*x[0-9]*.jpeg" \
-        --exclude="*-[0-9]*x[0-9]*.png" \
-        --exclude="*-[0-9]*x[0-9]*.gif" \
-        --exclude="*-[0-9]*x[0-9]*.webp" \
+        --no-wildcards \
+        --exclude-from=<(list_regenerable_thumbnails) \
         wp-content/ wp-config.php | zstd | webdav_upload "/$PARTIAL_DIR/wordpress-files.tar.zst" >/dev/null; then
         error "Failed to create and upload WordPress files backup"
     fi
