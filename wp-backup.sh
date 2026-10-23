@@ -193,7 +193,7 @@ backup_database() {
     log "Creating database dump and streaming to remote..."
     cd "$WORDPRESS_PATH"
 
-    if ! $WP_CLI_PATH db export --add-drop-table - | gzip | webdav_upload "/$PARTIAL_DIR/database.sql.gz" >/dev/null; then
+    if ! $WP_CLI_PATH db export --add-drop-table - | zstd | webdav_upload "/$PARTIAL_DIR/database.sql.zst" >/dev/null; then
         error "Failed to create and upload database dump"
     fi
 
@@ -222,13 +222,13 @@ backup_wordpress_files() {
     cd "$WORDPRESS_PATH"
 
     # Exclude WordPress thumbnails (can be regenerated with: wp media regenerate)
-    if ! tar -czf - \
+    if ! tar --create --file - \
         --dereference \
         --warning=no-file-changed \
         --exclude="wp-content/cache" \
         --exclude="wp-content/uploads/cache" \
         --exclude="wp-content/languages" \
-        --exclude="upgrade*" \
+        --exclude="wp-content/upgrade*" \
         --exclude="backwpup*" \
         --exclude="*.log" \
         --exclude=".git" \
@@ -240,7 +240,7 @@ backup_wordpress_files() {
         --exclude="*-[0-9]*x[0-9]*.png" \
         --exclude="*-[0-9]*x[0-9]*.gif" \
         --exclude="*-[0-9]*x[0-9]*.webp" \
-        wp-content/ wp-config.php | webdav_upload "/$PARTIAL_DIR/wordpress-files.tar.gz" >/dev/null; then
+        wp-content/ wp-config.php | zstd | webdav_upload "/$PARTIAL_DIR/wordpress-files.tar.zst" >/dev/null; then
         error "Failed to create and upload WordPress files backup"
     fi
 
@@ -254,8 +254,8 @@ create_manifest() {
 Backup Date: $(date)
 WordPress Path: $WORDPRESS_PATH
 Backup Type: Full WordPress Backup (Streamed)
-Database: Included (database.sql.gz)
-Files: Included (wordpress-files.tar.gz)
+Database: Included (database.sql.zst)
+Files: Included (wordpress-files.tar.zst)
 Plugins List: Included (plugins.json, plugins.txt)
 
 WordPress Version: $(cd "$WORDPRESS_PATH" && $WP_CLI_PATH core version 2>/dev/null || echo "Unknown")

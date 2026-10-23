@@ -7,14 +7,14 @@ A simple bash script for creating WordPress backups and uploading them to Hetzne
 - **WP-CLI** must be installed and available in PATH
 - **Knowledge of WP-CLI** is recommended for restore operations
 - **curl** for WebDAV uploads
-- **tar** and **gzip** for compression
+- **tar** and **zstd** for compression
 - **Hetzner Storage Box** account
 
 ## What Gets Backed Up
 
 The script creates backups of:
 
-- **Database** - Complete WordPress database dump (compressed with gzip, streamed directly to remote)
+- **Database** - Complete WordPress database dump (compressed with zstd, streamed directly to remote)
 - **WordPress Files** - Only essential files (streamed directly to remote):
   - `wp-content/` directory (excluding cache, plugins, languages)
   - `wp-config.php` file
@@ -25,7 +25,7 @@ The script creates backups of:
 
 The script uses **direct streaming** to upload backups:
 - No temporary files are stored locally
-- Database dumps are piped directly from WP-CLI through gzip to curl
+- Database dumps are piped directly from WP-CLI through zstd to curl
 - File archives are created by tar and streamed directly to remote storage
 - Reduces local disk usage and speeds up backup process
 

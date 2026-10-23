@@ -54,13 +54,13 @@ The script requires a config file at `~/.wp-backup.conf` with:
 
 - WP-CLI (for database dumps and WordPress info)
 - curl (for WebDAV uploads)
-- tar, gzip (for compression)
+- tar, zstd (for compression)
 - Standard bash utilities
 
 ## What Gets Backed Up
 
 The script creates backups of:
-- **Database** - Complete WordPress database dump (compressed with gzip)
+- **Database** - Complete WordPress database dump (compressed with zstd)
 - **WordPress Files** - Only essential files:
   - `wp-content/` directory (excluding cache, languages)
   - `wp-config.php` file
@@ -87,8 +87,8 @@ The following files/directories are excluded from backup:
 ## File Structure
 
 The script creates temporary backups in `~/tmp/wp-backups/` with timestamped directories containing:
-- `database.sql.gz` - Compressed database dump
-- `wordpress-files.tar.gz` - WordPress file archive
+- `database.sql.zst` - Compressed database dump
+- `wordpress-files.tar.zst` - WordPress file archive
 - `plugins.json/txt` - Plugin inventory
 - `manifest.txt` - Backup metadata
 - `wp-backup-YYYYMMDD_HHMMSS.tar.gz` - Final consolidated archive
