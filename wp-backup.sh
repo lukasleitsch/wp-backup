@@ -43,7 +43,7 @@ WORDPRESS_PATH="${WORDPRESS_PATH:-$HOME/html}"
 # WP-CLI path (usually just 'wp' if in PATH)
 WP_CLI_PATH="wp"
 
-set -euo pipefail
+set -Eeuo pipefail
 
 # Date and timestamp
 DATE=$(date +%Y%m%d_%H%M%S)
@@ -72,7 +72,6 @@ error() {
     echo -e "${RED}${message}${NC}" >&2
     LOG_CAPTURE="${LOG_CAPTURE}${message}
 "
-    healthcheck_ping "/$exit_code"
     exit $exit_code
 }
 
@@ -106,7 +105,7 @@ webdav_upload() {
 healthcheck_ping() {
     local endpoint="$1"
 
-    [ -z "$HEALTHCHECK_URL" ] && return
+    [ -z "${HEALTHCHECK_URL:-}" ] && return
 
     if [ -n "$LOG_CAPTURE" ]; then
         curl --fail --silent --show-error --max-time 10 --retry 5 --data-raw "$LOG_CAPTURE" "$HEALTHCHECK_URL$endpoint" >/dev/null 2>&1 || warning "Healthcheck ping failed"
@@ -115,15 +114,17 @@ healthcheck_ping() {
     fi
 }
 
-trap_handler() {
+exit_handler() {
     local exit_code="$1"
-    local line_number="$2"
-    echo "[ERROR] Script failed at line $line_number (exit code: $exit_code)" >&2
+    [ "$exit_code" -eq 0 ] && return
+    [ -n "${FAILED_LINE:-}" ] && echo "[ERROR] Script failed at line $FAILED_LINE (exit code: $exit_code)" >&2
     healthcheck_ping "/$exit_code"
-    exit "$exit_code"
 }
 
-trap 'trap_handler $? $LINENO' ERR
+# ERR only records the line: with set -E it also fires in subshells, where pinging would cause false alarms
+trap 'FAILED_LINE=$LINENO' ERR
+# EXIT runs once in the main shell, for error() and unexpected failures alike
+trap 'exit_handler $?' EXIT
 
 check_wp_cli() {
     if ! command -v $WP_CLI_PATH &> /dev/null; then
