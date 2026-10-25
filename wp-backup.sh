@@ -124,7 +124,11 @@ healthcheck_ping() {
 exit_handler() {
     local exit_code="$1"
     [ "$exit_code" -eq 0 ] && return
-    [ -n "${FAILED_LINE:-}" ] && echo "[ERROR] Script failed at line $FAILED_LINE (exit code: $exit_code)" >&2
+    if [ -n "${FAILED_LINE:-}" ]; then
+        echo "[ERROR] Script failed at line $FAILED_LINE (exit code: $exit_code)" >&2
+        LOG_CAPTURE="${LOG_CAPTURE}[ERROR] Script failed at line $FAILED_LINE (exit code: $exit_code)
+"
+    fi
     healthcheck_ping "/$exit_code"
 }
 
@@ -219,15 +223,21 @@ get_plugin_list() {
     log "Getting plugin list with versions and uploading to remote..."
     cd "$WORDPRESS_PATH"
 
-    # Create and upload JSON plugin list
-    if ! $WP_CLI_PATH plugin list --format=json | webdav_upload "/$PARTIAL_DIR/plugins.json" >/dev/null; then
+    # Collected before uploading, WP-CLI is slow and would leave the open request idle until the server answers 408
+    local plugins_json plugins_table
+
+    if ! plugins_json=$($WP_CLI_PATH plugin list --format=json); then
         warning "Failed to get plugin list in JSON format"
+        return
     fi
 
-    # Also create and upload readable text version
-    if ! $WP_CLI_PATH plugin list --format=table | webdav_upload "/$PARTIAL_DIR/plugins.txt" >/dev/null; then
+    if ! plugins_table=$($WP_CLI_PATH plugin list --format=table); then
         warning "Failed to get plugin list in table format"
+        return
     fi
+
+    printf '%s\n' "$plugins_json" | webdav_upload "/$PARTIAL_DIR/plugins.json" >/dev/null || warning "Failed to upload plugins.json"
+    printf '%s\n' "$plugins_table" | webdav_upload "/$PARTIAL_DIR/plugins.txt" >/dev/null || warning "Failed to upload plugins.txt"
 
     log "Plugin list created and uploaded successfully"
 }
@@ -247,6 +257,10 @@ backup_wordpress_files() {
     cd "$WORDPRESS_PATH"
 
     # Thumbnails can be regenerated with: wp media regenerate
+    # Collected before the upload starts, otherwise the open request stays idle until the server answers 408
+    local thumbnails
+    thumbnails=$(list_regenerable_thumbnails || true)
+
     # GNU tar exits 1 when files change while being read, the archive is still usable
     if ! { tar --create --file - \
         --dereference \
@@ -262,7 +276,7 @@ backup_wordpress_files() {
         --exclude=".DS_Store" \
         --exclude="Thumbs.db" \
         --no-wildcards \
-        --exclude-from=<(list_regenerable_thumbnails) \
+        --exclude-from=<(printf '%s' "$thumbnails") \
         wp-content/ wp-config.php || [ $? -eq 1 ]; } | zstd | webdav_upload "/$PARTIAL_DIR/wordpress-files.tar.zst" >/dev/null; then
         error "Failed to create and upload WordPress files backup"
     fi
@@ -273,7 +287,9 @@ backup_wordpress_files() {
 create_manifest() {
     log "Creating backup manifest and uploading to remote..."
 
-    cat << EOF | webdav_upload "/$PARTIAL_DIR/manifest.txt" >/dev/null
+    # Built before the upload starts, the WP-CLI calls would leave the open request idle
+    local manifest
+    manifest=$(cat << EOF
 Backup Date: $(date)
 WordPress Path: $WORDPRESS_PATH
 Backup Type: Full WordPress Backup (Streamed)
@@ -285,6 +301,11 @@ WordPress Version: $(cd "$WORDPRESS_PATH" && $WP_CLI_PATH core version 2>/dev/nu
 Active Theme: $(cd "$WORDPRESS_PATH" && $WP_CLI_PATH theme list --status=active --field=name 2>/dev/null || echo "Unknown")
 Total Plugins: $(cd "$WORDPRESS_PATH" && $WP_CLI_PATH plugin list --format=count 2>/dev/null || echo "Unknown")
 EOF
+)
+
+    if ! printf '%s\n' "$manifest" | webdav_upload "/$PARTIAL_DIR/manifest.txt" >/dev/null; then
+        error "Failed to upload backup manifest"
+    fi
 
     log "Manifest created and uploaded successfully"
 }
